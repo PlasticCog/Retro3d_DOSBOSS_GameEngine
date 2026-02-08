@@ -297,7 +297,7 @@ void Editor::drawAnimationTab(float dt) {
     ImGui::BeginChild("##Timeline", ImVec2(avail.x, botH), true);
     {
         static TimelinePanel::State tlState;
-        TimelinePanel::draw(tlState, dt, project.objects, selectedId, project.keyframes);
+        TimelinePanel::draw(tlState, project.objects, selectedId, project.keyframes);
     }
     ImGui::EndChild();
 }

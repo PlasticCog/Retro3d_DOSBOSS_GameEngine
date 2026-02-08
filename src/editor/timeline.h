@@ -8,9 +8,8 @@ namespace TimelinePanel {
         int currentFrame = 0;
         int totalFrames = 60;
         bool playing = false;
-        float accumulator = 0.0f;
     };
 
-    void draw(State& state, float dt, std::vector<SceneObject>& objects,
+    void draw(State& state, std::vector<SceneObject>& objects,
               const std::string& selectedId, std::vector<Keyframe>& keyframes);
 }
