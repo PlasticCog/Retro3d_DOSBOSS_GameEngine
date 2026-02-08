@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Retro 3D Studio</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body,#root{width:100%;height:100%;overflow:hidden}
+body{background:#1a1a2e;font-family:'Consolas','Fira Code','Courier New',monospace}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:#0a0a1a}
+::-webkit-scrollbar-thumb{background:#2a3a5c;border-radius:3px}
+input[type="number"]{-moz-appearance:textfield}
+input[type="number"]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const{useState,useRef,useEffect,useCallback}=React;
+const C={bg:"#1a1a2e",bgDark:"#12122a",bgPanel:"#16213e",bgInput:"#0f1629",bgHover:"#1f3460",bgActive:"#264180",border:"#2a3a5c",borderLight:"#3a4a7c",text:"#c8d6e5",textDim:"#6b7fa0",textBright:"#e8f0fe",accent:"#00d2ff",green:"#00e676",red:"#ff5252",orange:"#ff9100",yellow:"#ffd740",purple:"#b388ff"};
+const baseBtn={background:C.bgPanel,border:"1px solid "+C.border,color:C.text,padding:"4px 10px",borderRadius:3,cursor:"pointer",fontSize:11,display:"flex",alignItems:"center",gap:4,transition:"all 0.15s",fontFamily:"inherit"};
+let _uid=0;const uid=()=>"o"+(++_uid);
+const PRIM_TYPES=["box","cylinder","cone","sphere","wedge","plane"];
+const createPrim=(type,name)=>({id:uid(),name:name||(type.charAt(0).toUpperCase()+type.slice(1)+"_"+_uid),type,position:[0,0,0],rotation:[0,0,0],scale:[1,1,1],color:"#"+Math.floor(Math.random()*0xaaaaaa+0x555555).toString(16).padStart(6,"0"),visible:true,customVerts:null});
+
+const CONDITIONS=[
+  {id:"always",label:"Always",cat:"Special"},{id:"start_of_frame",label:"Start of Frame",cat:"Special"},
+  {id:"key_pressed",label:"Key Pressed",cat:"Input",params:[{n:"key",t:"key"}]},{id:"key_down",label:"Key Down",cat:"Input",params:[{n:"key",t:"key"}]},{id:"key_released",label:"Key Released",cat:"Input",params:[{n:"key",t:"key"}]},{id:"mouse_clicked",label:"Mouse Clicked",cat:"Input"},
+  {id:"collision",label:"Collision With",cat:"Collision",params:[{n:"object",t:"object"}]},
+  {id:"timer_equals",label:"Timer Equals",cat:"Timer",params:[{n:"seconds",t:"number"}]},{id:"timer_every",label:"Every X Seconds",cat:"Timer",params:[{n:"seconds",t:"number"}]},
+  {id:"compare_var",label:"Compare Variable",cat:"Variables",params:[{n:"variable",t:"string"},{n:"comparison",t:"comparison"},{n:"value",t:"number"}]},
+  {id:"object_visible",label:"Object Visible",cat:"Object",params:[{n:"object",t:"object"}]},{id:"object_invisible",label:"Object Invisible",cat:"Object",params:[{n:"object",t:"object"}]},
+  {id:"position_compare",label:"Compare Position",cat:"Position",params:[{n:"object",t:"object"},{n:"axis",t:"axis"},{n:"comparison",t:"comparison"},{n:"value",t:"number"}]},
+];
+const ACTIONS=[
+  {id:"move_object",label:"Move Object",cat:"Movement",params:[{n:"object",t:"object"},{n:"x",t:"number"},{n:"y",t:"number"},{n:"z",t:"number"}]},
+  {id:"set_position",label:"Set Position",cat:"Movement",params:[{n:"object",t:"object"},{n:"x",t:"number"},{n:"y",t:"number"},{n:"z",t:"number"}]},
+  {id:"rotate_object",label:"Rotate Object",cat:"Movement",params:[{n:"object",t:"object"},{n:"x",t:"number"},{n:"y",t:"number"},{n:"z",t:"number"}]},
+  {id:"set_rotation",label:"Set Rotation",cat:"Movement",params:[{n:"object",t:"object"},{n:"x",t:"number"},{n:"y",t:"number"},{n:"z",t:"number"}]},
+  {id:"destroy_object",label:"Destroy Object",cat:"Object",params:[{n:"object",t:"object"}]},
+  {id:"show_object",label:"Show Object",cat:"Object",params:[{n:"object",t:"object"}]},{id:"hide_object",label:"Hide Object",cat:"Object",params:[{n:"object",t:"object"}]},
+  {id:"set_variable",label:"Set Variable",cat:"Variables",params:[{n:"variable",t:"string"},{n:"value",t:"number"}]},{id:"add_to_variable",label:"Add to Variable",cat:"Variables",params:[{n:"variable",t:"string"},{n:"value",t:"number"}]},
+  {id:"play_sound",label:"Play Sound",cat:"Sound",params:[{n:"sound",t:"string"}]},{id:"stop_sound",label:"Stop Sound",cat:"Sound"},
+  {id:"move_camera",label:"Move Camera",cat:"Camera",params:[{n:"x",t:"number"},{n:"y",t:"number"},{n:"z",t:"number"}]},
+  {id:"set_camera_position",label:"Set Camera Position",cat:"Camera",params:[{n:"x",t:"number"},{n:"y",t:"number"},{n:"z",t:"number"}]},
+  {id:"restart_frame",label:"Restart Frame",cat:"Game"},{id:"end_game",label:"End Game",cat:"Game"},
+];
+
+const Ico={
+  Box:()=>React.createElement("svg",{width:16,height:16,viewBox:"0 0 16 16",fill:"none"},React.createElement("path",{d:"M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z",stroke:"currentColor",strokeWidth:1.5})),
+  Cyl:()=>React.createElement("svg",{width:16,height:16,viewBox:"0 0 16 16",fill:"none"},React.createElement("ellipse",{cx:8,cy:4,rx:5,ry:2,stroke:"currentColor",strokeWidth:1.5}),React.createElement("path",{d:"M3 4V12C3 13.1 5.24 14 8 14C10.76 14 13 13.1 13 12V4",stroke:"currentColor",strokeWidth:1.5})),
+  Cone:()=>React.createElement("svg",{width:16,height:16,viewBox:"0 0 16 16",fill:"none"},React.createElement("path",{d:"M8 2L13 13H3L8 2Z",stroke:"currentColor",strokeWidth:1.5})),
+  Sph:()=>React.createElement("svg",{width:16,height:16,viewBox:"0 0 16 16",fill:"none"},React.createElement("circle",{cx:8,cy:8,r:6,stroke:"currentColor",strokeWidth:1.5})),
+  Wedge:()=>React.createElement("svg",{width:16,height:16,viewBox:"0 0 16 16",fill:"none"},React.createElement("path",{d:"M3 13L3 5L13 13H3Z",stroke:"currentColor",strokeWidth:1.5})),
+  Plane:()=>React.createElement("svg",{width:16,height:16,viewBox:"0 0 16 16",fill:"none"},React.createElement("path",{d:"M2 6L8 3L14 6L8 9L2 6Z",stroke:"currentColor",strokeWidth:1.5})),
+  Play:()=>React.createElement("svg",{width:14,height:14,viewBox:"0 0 14 14",fill:"currentColor"},React.createElement("path",{d:"M3 1.5L12 7L3 12.5V1.5Z"})),
+  Pause:()=>React.createElement("svg",{width:14,height:14,viewBox:"0 0 14 14",fill:"currentColor"},React.createElement("rect",{x:3,y:2,width:3,height:10}),React.createElement("rect",{x:8,y:2,width:3,height:10})),
+  Stop:()=>React.createElement("svg",{width:14,height:14,viewBox:"0 0 14 14",fill:"currentColor"},React.createElement("rect",{x:2,y:2,width:10,height:10,rx:1})),
+  Plus:()=>React.createElement("svg",{width:14,height:14,viewBox:"0 0 14 14",fill:"none"},React.createElement("path",{d:"M7 2V12M2 7H12",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round"})),
+  Trash:()=>React.createElement("svg",{width:14,height:14,viewBox:"0 0 14 14",fill:"none"},React.createElement("path",{d:"M3 4H11L10.2 12H3.8L3 4ZM5 4V2.5C5 2.2 5.2 2 5.5 2H8.5C8.8 2 9 2.2 9 2.5V4M2 4H12",stroke:"currentColor",strokeWidth:1.2})),
+  Move:()=>React.createElement("svg",{width:14,height:14,viewBox:"0 0 14 14",fill:"none"},React.createElement("path",{d:"M7 1V13M1 7H13M7 1L5 3M7 1L9 3M7 13L5 11M7 13L9 11M1 7L3 5M1 7L3 9M13 7L11 5M13 7L11 9",stroke:"currentColor",strokeWidth:1.2})),
+  Rotate:()=>React.createElement("svg",{width:14,height:14,viewBox:"0 0 14 14",fill:"none"},React.createElement("path",{d:"M11 3C9.8 1.8 8 1.2 6.2 1.5C3.5 2 1.5 4.5 1.5 7.2C1.5 10.4 4.1 13 7.3 13C9.7 13 11.8 11.4 12.5 9.2",stroke:"currentColor",strokeWidth:1.3})),
+  Scale:()=>React.createElement("svg",{width:14,height:14,viewBox:"0 0 14 14",fill:"none"},React.createElement("rect",{x:1,y:1,width:5,height:5,stroke:"currentColor",strokeWidth:1.2}),React.createElement("rect",{x:8,y:8,width:5,height:5,stroke:"currentColor",strokeWidth:1.2})),
+  Vertex:()=>React.createElement("svg",{width:14,height:14,viewBox:"0 0 14 14",fill:"none"},React.createElement("circle",{cx:3,cy:3,r:2,fill:"currentColor"}),React.createElement("circle",{cx:11,cy:3,r:2,fill:"currentColor"}),React.createElement("circle",{cx:7,cy:11,r:2,fill:"currentColor"}),React.createElement("path",{d:"M3 3L11 3L7 11L3 3Z",stroke:"currentColor",strokeWidth:0.8,opacity:0.4})),
+};
+const PRIM_ICONS={box:Ico.Box,cylinder:Ico.Cyl,cone:Ico.Cone,sphere:Ico.Sph,wedge:Ico.Wedge,plane:Ico.Plane};
+
+// ============================================================
+// GEOMETRY HELPERS
+// ============================================================
+function makeGeometry(type, customVerts) {
+  let geo;
+  switch(type) {
+    case "box": geo = new THREE.BoxGeometry(1,1,1); break;
+    case "cylinder": geo = new THREE.CylinderGeometry(0.5,0.5,1,12); break;
+    case "cone": geo = new THREE.ConeGeometry(0.5,1,12); break;
+    case "sphere": geo = new THREE.SphereGeometry(0.5,12,8); break;
+    case "wedge": geo = new THREE.BufferGeometry();
+      {const v=new Float32Array([-0.5,-0.5,0.5,0.5,-0.5,0.5,0.5,-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,0.5,-0.5,0.5,0.5,-0.5]);
+       geo.setAttribute("position",new THREE.BufferAttribute(v,3));
+       geo.setIndex([0,1,2,0,2,3,3,2,5,3,5,4,0,3,4,1,5,2,0,4,5,0,5,1]);geo.computeVertexNormals();}break;
+    case "plane": geo = new THREE.PlaneGeometry(1,1); break;
+    default: geo = new THREE.BoxGeometry(1,1,1);
+  }
+  if (customVerts) {
+    const pos=geo.getAttribute("position").array;
+    for(let i=0;i<Math.min(customVerts.length,pos.length);i++) pos[i]=customVerts[i];
+    geo.getAttribute("position").needsUpdate=true; geo.computeVertexNormals(); geo.computeBoundingSphere();
+  }
+  return geo;
+}
+function getUniqueVerts(geo) {
+  const pos=geo.getAttribute("position"),verts=[],map=[],EPS=0.0001;
+  for(let i=0;i<pos.count;i++){const x=pos.getX(i),y=pos.getY(i),z=pos.getZ(i);let f=-1;
+    for(let j=0;j<verts.length;j++){if(Math.abs(verts[j].x-x)<EPS&&Math.abs(verts[j].y-y)<EPS&&Math.abs(verts[j].z-z)<EPS){f=j;break;}}
+    if(f>=0)map.push(f);else{map.push(verts.length);verts.push(new THREE.Vector3(x,y,z));}}
+  return{verts,map};
+}
+function moveUniqueVert(geo,ui,map,np) {
+  const pos=geo.getAttribute("position");
+  for(let i=0;i<map.length;i++){if(map[i]===ui)pos.setXYZ(i,np.x,np.y,np.z);}
+  pos.needsUpdate=true;geo.computeVertexNormals();geo.computeBoundingSphere();
+}
+function serializeVerts(geo){return Array.from(geo.getAttribute("position").array);}
+
+// ============================================================
+// XYZ GIZMO - Creates axis arrows for constrained movement
+// ============================================================
+class AxisGizmo {
+  constructor(scene) {
+    this.scene = scene;
+    this.group = new THREE.Group();
+    this.group.name = "__axis_gizmo__";
+    this.group.renderOrder = 1000;
+    this.arrows = {}; // {x: mesh, y: mesh, z: mesh}
+    this.activeAxis = null;
+    this._visible = false;
+
+    const axes = [
+      {name:"x", dir:new THREE.Vector3(1,0,0), color:0xff4444},
+      {name:"y", dir:new THREE.Vector3(0,1,0), color:0x44ff44},
+      {name:"z", dir:new THREE.Vector3(0,0,1), color:0x4488ff},
+    ];
+
+    axes.forEach(a => {
+      const lineGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0,0,0), a.dir.clone().multiplyScalar(1.5)
+      ]);
+      const lineMat = new THREE.LineBasicMaterial({color:a.color, linewidth:2, depthTest:false, transparent:true, opacity:0.9});
+      const line = new THREE.Line(lineGeo, lineMat);
+      line.renderOrder = 1000;
+
+      // Cone arrowhead
+      const coneGeo = new THREE.ConeGeometry(0.08, 0.25, 8);
+      const coneMat = new THREE.MeshBasicMaterial({color:a.color, depthTest:false, transparent:true, opacity:0.9});
+      const cone = new THREE.Mesh(coneGeo, coneMat);
+      cone.renderOrder = 1001;
+      // Position at end of shaft and rotate to point along axis
+      cone.position.copy(a.dir.clone().multiplyScalar(1.5));
+      if (a.name === "x") cone.rotation.z = -Math.PI/2;
+      else if (a.name === "y") cone.rotation.z = 0; // default points up
+      else cone.rotation.x = Math.PI/2;
+
+      // Invisible fat cylinder for easier clicking
+      const hitGeo = new THREE.CylinderGeometry(0.12, 0.12, 1.5, 6);
+      const hitMat = new THREE.MeshBasicMaterial({visible:false});
+      const hitMesh = new THREE.Mesh(hitGeo, hitMat);
+      hitMesh.renderOrder = 1002;
+      // Position at midpoint of axis
+      hitMesh.position.copy(a.dir.clone().multiplyScalar(0.75));
+      if (a.name === "x") hitMesh.rotation.z = Math.PI/2;
+      else if (a.name === "z") hitMesh.rotation.x = Math.PI/2;
+      hitMesh.userData = {axisName: a.name, isGizmoHit: true};
+
+      const axisGroup = new THREE.Group();
+      axisGroup.add(line); axisGroup.add(cone); axisGroup.add(hitMesh);
+      this.group.add(axisGroup);
+      this.arrows[a.name] = {group: axisGroup, line, cone, hit: hitMesh, dir: a.dir.clone(), color: a.color};
+    });
+
+    // Center cube
+    const centerGeo = new THREE.BoxGeometry(0.25, 0.25, 0.25);
+    const centerMat = new THREE.MeshBasicMaterial({color:0xffffff, depthTest:false, transparent:true, opacity:0.7});
+    this.centerMesh = new THREE.Mesh(centerGeo, centerMat);
+    this.centerMesh.renderOrder = 1001;
+    this.centerMesh.userData = {axisName: "all", isGizmoHit: true};
+    this.group.add(this.centerMesh);
+
+    scene.add(this.group);
+    this.group.visible = false;
+  }
+
+  show(worldPos) {
+    this.group.position.copy(worldPos);
+    this.group.visible = true;
+    this._visible = true;
+  }
+
+  hide() {
+    this.group.visible = false;
+    this._visible = false;
+    this.clearHighlight();
+  }
+
+  // Scale gizmo to appear constant size regardless of camera distance
+  updateScale(camera) {
+    if (!this._visible) return;
+    const dist = camera.position.distanceTo(this.group.position);
+    const s = dist * 0.15;
+    this.group.scale.setScalar(Math.max(0.3, Math.min(s, 3)));
+  }
+
+  // Get hit-test meshes
+  getHitMeshes() {
+    return [...Object.values(this.arrows).map(a => a.hit), this.centerMesh];
+  }
+
+  highlight(axisName) {
+    this.activeAxis = axisName;
+    Object.entries(this.arrows).forEach(([name, a]) => {
+      const bright = axisName === "all" || name === axisName;
+      a.line.material.opacity = bright ? 1.0 : 0.25;
+      a.cone.material.opacity = bright ? 1.0 : 0.25;
+    });
+    this.centerMesh.material.opacity = axisName === "all" ? 1.0 : 0.4;
+  }
+
+  clearHighlight() {
+    this.activeAxis = null;
+    Object.values(this.arrows).forEach(a => {
+      a.line.material.opacity = 0.9;
+      a.cone.material.opacity = 0.9;
+    });
+    this.centerMesh.material.opacity = 0.7;
+  }
+
+  dispose() {
+    this.scene.remove(this.group);
+    this.group.traverse(c => { if(c.geometry)c.geometry.dispose(); if(c.material)c.material.dispose(); });
+  }
+}
+
+// ============================================================
+// INLINE GAME RUNTIME (click-drag mouse look, no pointer lock)
+// ============================================================
+function GameRuntime({ project, onStop }) {
+  const canvasRef = useRef(null);
+  const stRef = useRef({running:false, animId:null});
+  const [started, setStarted] = useState(false);
+  const hudVars=useRef(null),hudFps=useRef(null),hudPos=useRef(null),hudDbg=useRef(null);
+
+  useEffect(() => {
+    if (!started) return;
+    const container = canvasRef.current; if (!container) return;
+    const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0a0a1a); scene.fog = new THREE.FogExp2(0x0a0a1a,0.015);
+    const w=container.clientWidth, h=container.clientHeight;
+    const camera = new THREE.PerspectiveCamera(75,w/h,0.1,500); camera.position.set(0,1.6,5);
+    const renderer = new THREE.WebGLRenderer({antialias:false}); renderer.setSize(w,h); renderer.setPixelRatio(1); renderer.shadowMap.enabled=true;
+    container.appendChild(renderer.domElement); const clock = new THREE.Clock();
+    const dl=new THREE.DirectionalLight(0xffffff,0.8);dl.position.set(10,20,10);dl.castShadow=true;dl.shadow.mapSize.set(512,512);scene.add(dl);
+    scene.add(new THREE.AmbientLight(0x334466,0.5)); scene.add(new THREE.HemisphereLight(0x4488cc,0x223344,0.3));
+
+    const gameObjs={};
+    project.objects.forEach(obj=>{
+      const geo=makeGeometry(obj.type,obj.customVerts);
+      const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(obj.color),roughness:0.8,metalness:0.05,flatShading:true});
+      const mesh=new THREE.Mesh(geo,mat);
+      mesh.position.set(obj.position[0],obj.position[1],obj.position[2]);
+      mesh.rotation.set(obj.rotation[0]*Math.PI/180,obj.rotation[1]*Math.PI/180,obj.rotation[2]*Math.PI/180);
+      mesh.scale.set(obj.scale[0],obj.scale[1],obj.scale[2]);
+      mesh.castShadow=true;mesh.receiveShadow=true;mesh.visible=obj.visible;scene.add(mesh);
+      gameObjs[obj.name]={mesh,name:obj.name,origPos:obj.position.slice(),origRot:obj.rotation.slice(),origScale:obj.scale.slice()};
+    });
+
+    // Game state - NO pointer lock, use click-drag for look
+    const gs={keysDown:{},keysPressed:{},keysReleased:{},mouseClicked:false,gameTimer:0,timerAccum:{},isFirst:true,destroyed:{},variables:{},
+      yaw:0,pitch:0,velY:0,grounded:true,fc:0,lastFT:performance.now(),fps:0,dbgLines:[],
+      mouseLook:false,lastMX:0,lastMY:0};
+    const H=1.6,SPD=5,LOOK=0.004,GRAV=-15,JUMP=6;
+    stRef.current.running=true;
+
+    function dbg(m){gs.dbgLines.push(m);if(gs.dbgLines.length>6)gs.dbgLines.shift();if(hudDbg.current)hudDbg.current.innerText=gs.dbgLines.join("\n");}
+    function findObj(n){if(!n)return null;const nl=n.toLowerCase().trim();for(const k in gameObjs){if(k.toLowerCase()===nl)return gameObjs[k];}for(const k in gameObjs){if(k.toLowerCase().indexOf(nl)!==-1)return gameObjs[k];}return null;}
+    function compare(a,op,b){switch(op){case"Equal":case"equal":case"==":return a===b;case"Not Equal":case"!=":return a!==b;case"Less Than":case"<":return a<b;case"Less or Equal":case"<=":return a<=b;case"Greater Than":case">":return a>b;case"Greater or Equal":case">=":return a>=b;default:return a===b;}}
+    function evalCond(c){const p=c.params||{};let r=false;switch(c.type){
+      case"always":r=true;break;case"start_of_frame":r=gs.isFirst;break;
+      case"key_pressed":r=!!gs.keysPressed[(p.key||"").toUpperCase()];break;
+      case"key_down":r=!!gs.keysDown[(p.key||"").toUpperCase()];break;
+      case"key_released":r=!!gs.keysReleased[(p.key||"").toUpperCase()];break;
+      case"mouse_clicked":r=gs.mouseClicked;break;
+      case"timer_equals":r=Math.abs(gs.gameTimer-(parseFloat(p.seconds)||0))<0.05;break;
+      case"timer_every":{const iv=parseFloat(p.seconds)||1,tk="ev_"+iv;if(!gs.timerAccum[tk])gs.timerAccum[tk]=0;r=gs.timerAccum[tk]>=iv;if(r)gs.timerAccum[tk]-=iv;break;}
+      case"compare_var":r=compare(gs.variables[p.variable]||0,p.comparison,parseFloat(p.value)||0);break;
+      case"object_visible":{const o=findObj(p.object);r=o?o.mesh.visible:false;break;}
+      case"object_invisible":{const o=findObj(p.object);r=o?!o.mesh.visible:false;break;}
+      case"position_compare":{const o=findObj(p.object);if(o){const ax={x:o.mesh.position.x,y:o.mesh.position.y,z:o.mesh.position.z};r=compare(ax[p.axis]||0,p.comparison,parseFloat(p.value)||0);}break;}
+    }return c.negate?!r:r;}
+    function execAct(a,dt){const p=a.params||{};switch(a.type){
+      case"move_object":{const o=findObj(p.object);if(o&&!gs.destroyed[o.name]){o.mesh.position.x+=(parseFloat(p.x)||0)*dt*60;o.mesh.position.y+=(parseFloat(p.y)||0)*dt*60;o.mesh.position.z+=(parseFloat(p.z)||0)*dt*60;}break;}
+      case"set_position":{const o=findObj(p.object);if(o)o.mesh.position.set(parseFloat(p.x)||0,parseFloat(p.y)||0,parseFloat(p.z)||0);break;}
+      case"rotate_object":{const o=findObj(p.object);if(o&&!gs.destroyed[o.name]){o.mesh.rotation.x+=(parseFloat(p.x)||0)*Math.PI/180*dt*60;o.mesh.rotation.y+=(parseFloat(p.y)||0)*Math.PI/180*dt*60;o.mesh.rotation.z+=(parseFloat(p.z)||0)*Math.PI/180*dt*60;}break;}
+      case"set_rotation":{const o=findObj(p.object);if(o)o.mesh.rotation.set((parseFloat(p.x)||0)*Math.PI/180,(parseFloat(p.y)||0)*Math.PI/180,(parseFloat(p.z)||0)*Math.PI/180);break;}
+      case"destroy_object":{const o=findObj(p.object);if(o){o.mesh.visible=false;gs.destroyed[o.name]=true;dbg("Destroyed: "+o.name);}break;}
+      case"show_object":{const o=findObj(p.object);if(o){o.mesh.visible=true;delete gs.destroyed[o.name];}break;}
+      case"hide_object":{const o=findObj(p.object);if(o)o.mesh.visible=false;break;}
+      case"set_variable":gs.variables[p.variable]=parseFloat(p.value)||0;break;
+      case"add_to_variable":gs.variables[p.variable]=(gs.variables[p.variable]||0)+(parseFloat(p.value)||0);break;
+      case"move_camera":camera.position.x+=(parseFloat(p.x)||0)*dt*60;camera.position.y+=(parseFloat(p.y)||0)*dt*60;camera.position.z+=(parseFloat(p.z)||0)*dt*60;break;
+      case"set_camera_position":camera.position.set(parseFloat(p.x)||0,parseFloat(p.y)||0,parseFloat(p.z)||0);break;
+      case"play_sound":dbg("SFX: "+(p.sound||"sound"));break;
+      case"restart_frame":for(const k in gameObjs){const oo=gameObjs[k];oo.mesh.position.set(oo.origPos[0],oo.origPos[1],oo.origPos[2]);oo.mesh.rotation.set(oo.origRot[0]*Math.PI/180,oo.origRot[1]*Math.PI/180,oo.origRot[2]*Math.PI/180);oo.mesh.scale.set(oo.origScale[0],oo.origScale[1],oo.origScale[2]);oo.mesh.visible=true;}
+        gs.destroyed={};gs.variables={};gs.gameTimer=0;gs.isFirst=true;camera.position.set(0,H,5);gs.yaw=0;gs.pitch=0;dbg("Restarted");break;
+      case"end_game":dbg("GAME OVER");stRef.current.running=false;break;
+    }}
+
+    // Input: click-drag for mouse look, WASD always active
+    const onKD=e=>{const k=e.key.toUpperCase();if(!gs.keysDown[k])gs.keysPressed[k]=true;gs.keysDown[k]=true;e.preventDefault();};
+    const onKU=e=>{const k=e.key.toUpperCase();gs.keysDown[k]=false;gs.keysReleased[k]=true;};
+    const onMD=e=>{gs.mouseClicked=true;if(e.button===0){gs.mouseLook=true;gs.lastMX=e.clientX;gs.lastMY=e.clientY;}};
+    const onMU=e=>{if(e.button===0)gs.mouseLook=false;};
+    const onMM=e=>{if(gs.mouseLook){const dx=e.clientX-gs.lastMX,dy=e.clientY-gs.lastMY;gs.yaw-=dx*LOOK;gs.pitch=Math.max(-1.4,Math.min(1.4,gs.pitch-dy*LOOK));gs.lastMX=e.clientX;gs.lastMY=e.clientY;}};
+    document.addEventListener("keydown",onKD);document.addEventListener("keyup",onKU);
+    document.addEventListener("mousedown",onMD);document.addEventListener("mouseup",onMU);document.addEventListener("mousemove",onMM);
+    const ro=new ResizeObserver(()=>{const nw=container.clientWidth,nh=container.clientHeight;camera.aspect=nw/nh;camera.updateProjectionMatrix();renderer.setSize(nw,nh);});
+    ro.observe(container);
+    dbg("Init: "+Object.keys(gameObjs).length+" objects"); clock.start();
+
+    function gameLoop(){
+      if(!stRef.current.running)return;
+      stRef.current.animId=requestAnimationFrame(gameLoop);
+      const dt=Math.min(clock.getDelta(),0.05); gs.gameTimer+=dt;
+      for(const tk in gs.timerAccum)gs.timerAccum[tk]+=dt;
+      // Movement always active
+      const fwd=new THREE.Vector3(-Math.sin(gs.yaw),0,-Math.cos(gs.yaw));
+      const right=new THREE.Vector3(Math.cos(gs.yaw),0,-Math.sin(gs.yaw));
+      const mv=new THREE.Vector3();
+      if(gs.keysDown["W"]||gs.keysDown["ARROWUP"])mv.add(fwd);
+      if(gs.keysDown["S"]||gs.keysDown["ARROWDOWN"])mv.sub(fwd);
+      if(gs.keysDown["A"]||gs.keysDown["ARROWLEFT"])mv.sub(right);
+      if(gs.keysDown["D"]||gs.keysDown["ARROWRIGHT"])mv.add(right);
+      if(mv.length()>0)mv.normalize().multiplyScalar(SPD*dt);
+      gs.velY+=GRAV*dt;
+      if(gs.keysDown[" "]&&gs.grounded){gs.velY=JUMP;gs.grounded=false;}
+      camera.position.x+=mv.x;camera.position.z+=mv.z;camera.position.y+=gs.velY*dt;
+      if(camera.position.y<=H){camera.position.y=H;gs.velY=0;gs.grounded=true;}
+      camera.rotation.order="YXZ";camera.rotation.y=gs.yaw;camera.rotation.x=gs.pitch;
+      // Events
+      project.events.forEach(evt=>{if(!evt.enabled||evt.conditions.length===0)return;let ok=true;for(let i=0;i<evt.conditions.length;i++){if(!evalCond(evt.conditions[i])){ok=false;break;}}if(ok)evt.actions.forEach(a=>execAct(a,dt));});
+      // HUD
+      gs.fc++;const now=performance.now();if(now-gs.lastFT>500){gs.fps=Math.round(gs.fc/((now-gs.lastFT)/1000));gs.fc=0;gs.lastFT=now;}
+      if(hudVars.current){const vs=[];for(const k in gs.variables)vs.push(k+": "+gs.variables[k]);hudVars.current.innerText=vs.join("  |  ");}
+      if(hudFps.current)hudFps.current.innerText=gs.fps+" FPS";
+      if(hudPos.current)hudPos.current.innerText="X:"+camera.position.x.toFixed(1)+" Y:"+camera.position.y.toFixed(1)+" Z:"+camera.position.z.toFixed(1);
+      gs.keysPressed={};gs.keysReleased={};gs.mouseClicked=false;gs.isFirst=false;
+      renderer.render(scene,camera);
+    }
+    gameLoop();
+    return()=>{stRef.current.running=false;if(stRef.current.animId)cancelAnimationFrame(stRef.current.animId);
+      document.removeEventListener("keydown",onKD);document.removeEventListener("keyup",onKU);
+      document.removeEventListener("mousedown",onMD);document.removeEventListener("mouseup",onMU);document.removeEventListener("mousemove",onMM);
+      ro.disconnect();renderer.dispose();if(container.contains(renderer.domElement))container.removeChild(renderer.domElement);};
+  },[started]);
+
+  const stopGame=()=>{stRef.current.running=false;onStop();};
+  return <div style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",zIndex:9999,background:"#000"}}>
+    <style>{`@keyframes rtBlink{0%,100%{opacity:1}50%{opacity:0.2}}`}</style>
+    {!started&&<div onClick={()=>setStarted(true)} style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,0.92)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",zIndex:10000,cursor:"pointer"}}>
+      <div style={{fontSize:32,color:"#0f0",fontFamily:"monospace",fontWeight:700,textShadow:"0 0 30px #0f0",marginBottom:16}}>RETRO 3D STUDIO</div>
+      <div style={{fontSize:14,color:"#0af",fontFamily:"monospace",marginBottom:4}}><b>{project.projectName}</b></div>
+      <div style={{fontSize:11,color:"#666",fontFamily:"monospace"}}>{project.objects.length} objects &middot; {project.events.length} events</div>
+      <div style={{fontSize:18,color:"#ff0",fontFamily:"monospace",marginTop:24,animation:"rtBlink 1s infinite"}}>[ CLICK TO START ]</div>
+      <div style={{fontSize:11,color:"#555",fontFamily:"monospace",marginTop:16}}>WASD: Move &middot; Click+Drag: Look &middot; Space: Jump</div>
+      <div onClick={e=>{e.stopPropagation();stopGame();}} style={{marginTop:32,padding:"8px 20px",background:"rgba(255,82,82,0.15)",border:"1px solid #ff5252",color:"#ff5252",borderRadius:4,fontSize:12,fontFamily:"monospace",cursor:"pointer"}}>{"\u25a0"} Back to Editor</div>
+    </div>}
+    <div ref={hudVars} style={{position:"absolute",top:10,left:10,fontSize:14,color:"#0f0",fontFamily:"monospace",textShadow:"0 0 6px #0f0",zIndex:10001,pointerEvents:"none"}}></div>
+    <div ref={hudFps} style={{position:"absolute",top:10,right:10,fontSize:12,color:"#0cf",fontFamily:"monospace",textShadow:"0 0 4px #0cf",zIndex:10001,pointerEvents:"none"}}></div>
+    <div ref={hudPos} style={{position:"absolute",bottom:10,left:10,fontSize:11,color:"#0cf",fontFamily:"monospace",textShadow:"0 0 4px #0cf",zIndex:10001,pointerEvents:"none"}}></div>
+    <div ref={hudDbg} style={{position:"absolute",bottom:30,left:10,fontSize:10,color:"#444",fontFamily:"monospace",zIndex:10001,pointerEvents:"none",whiteSpace:"pre"}}></div>
+    {started&&<div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",fontSize:24,color:"#0f0",opacity:0.6,fontFamily:"monospace",zIndex:10001,pointerEvents:"none"}}>+</div>}
+    <div onClick={stopGame} style={{position:"absolute",top:10,left:"50%",transform:"translateX(-50%)",background:"rgba(255,82,82,0.2)",border:"1px solid #ff5252",color:"#ff5252",padding:"4px 16px",borderRadius:4,fontSize:12,fontFamily:"monospace",cursor:"pointer",zIndex:10002}}>{"\u25a0"} STOP</div>
+    <div ref={canvasRef} style={{width:"100%",height:"100%"}}></div>
+  </div>;
+}
+
+// ============================================================
+// VIEWPORT WITH GIZMO + VERTEX EDITING
+// ============================================================
+function Viewport3D({objects, selectedId, onSelect, onUpdate, mode, onVertexEdit}) {
+  const containerRef = useRef(null);
+  const sRef = useRef({renderer:null, scene:null, camera:null, meshMap:{}, animId:null, gizmo:null});
+  const camR = useRef({aX:-0.5, aY:0.6, d:12, tgt:new THREE.Vector3(0,0,0), drag:false, pv:{x:0,y:0}});
+  const vtxRef = useRef({group:null, handles:[], data:null, selected:new Set(), wireframe:null, objId:null});
+  const dragRef = useRef({active:false, type:null, axis:null, startMouse:{x:0,y:0}, startPos:null, startRot:null, startScale:null, startVerts:null});
+  const modeRef = useRef(mode); modeRef.current = mode;
+  const objRef = useRef(objects); objRef.current = objects;
+  const selRef = useRef(selectedId); selRef.current = selectedId;
+
+  const updCam=()=>{const c=camR.current,s=sRef.current;if(!s.camera)return;s.camera.position.x=c.tgt.x+c.d*Math.sin(c.aX)*Math.cos(c.aY);s.camera.position.y=c.tgt.y+c.d*Math.sin(c.aY);s.camera.position.z=c.tgt.z+c.d*Math.cos(c.aX)*Math.cos(c.aY);s.camera.lookAt(c.tgt);};
+
+  const clearVtx=()=>{const v=vtxRef.current,s=sRef.current;if(v.group&&s.scene){s.scene.remove(v.group);v.handles.forEach(h=>{h.mesh.geometry.dispose();h.mesh.material.dispose();});}if(v.wireframe&&s.scene){s.scene.remove(v.wireframe);v.wireframe.geometry?.dispose();v.wireframe.material?.dispose();v.wireframe=null;}v.group=null;v.handles=[];v.data=null;v.selected=new Set();v.objId=null;};
+
+  const buildVtx=(objId)=>{const v=vtxRef.current,s=sRef.current;clearVtx();if(!objId||!s.meshMap[objId])return;const mesh=s.meshMap[objId];mesh.updateMatrixWorld(true);
+    const data=getUniqueVerts(mesh.geometry);v.data=data;v.objId=objId;
+    const group=new THREE.Group();group.name="__vtx__";
+    const hGeo=new THREE.SphereGeometry(0.06,6,4);
+    data.verts.forEach((vert,idx)=>{const mat=new THREE.MeshBasicMaterial({color:0x00d2ff,depthTest:false,transparent:true,opacity:0.9});const hm=new THREE.Mesh(hGeo,mat);
+      hm.position.copy(vert.clone().applyMatrix4(mesh.matrixWorld));hm.renderOrder=999;hm.userData={uniqueIdx:idx,isVtxHandle:true};group.add(hm);v.handles.push({mesh:hm,uniqueIdx:idx});});
+    s.scene.add(group);v.group=group;
+    const wfGeo=mesh.geometry.clone();const wfMat=new THREE.MeshBasicMaterial({color:0x00d2ff,wireframe:true,transparent:true,opacity:0.3,depthTest:false});
+    const wfMesh=new THREE.Mesh(wfGeo,wfMat);wfMesh.position.copy(mesh.position);wfMesh.rotation.copy(mesh.rotation);wfMesh.scale.copy(mesh.scale);wfMesh.renderOrder=998;s.scene.add(wfMesh);v.wireframe=wfMesh;
+  };
+
+  const syncVtxWireframe=()=>{const v=vtxRef.current,s=sRef.current;if(!v.wireframe||!v.objId||!s.meshMap[v.objId])return;
+    const pos=s.meshMap[v.objId].geometry.getAttribute("position"),wfPos=v.wireframe.geometry.getAttribute("position");
+    for(let i=0;i<pos.count;i++)wfPos.setXYZ(i,pos.getX(i),pos.getY(i),pos.getZ(i));wfPos.needsUpdate=true;v.wireframe.geometry.computeVertexNormals();};
+
+  const updateHandleColors=()=>{vtxRef.current.handles.forEach(h=>{const sel=vtxRef.current.selected.has(h.uniqueIdx);h.mesh.material.color.set(sel?0xffd740:0x00d2ff);h.mesh.scale.setScalar(sel?1.6:1.0);});};
+
+  // Project world axis direction to screen-space for dragging
+  const axisToScreen=(axis,worldPos,camera,el)=>{
+    const p1=worldPos.clone().project(camera);
+    const p2=worldPos.clone().add(axis).project(camera);
+    const rect=el.getBoundingClientRect();
+    const s1={x:(p1.x*0.5+0.5)*rect.width, y:(-p1.y*0.5+0.5)*rect.height};
+    const s2={x:(p2.x*0.5+0.5)*rect.width, y:(-p2.y*0.5+0.5)*rect.height};
+    const dx=s2.x-s1.x, dy=s2.y-s1.y;
+    const len=Math.sqrt(dx*dx+dy*dy);
+    return len>0.001 ? {x:dx/len, y:dy/len, scale:len} : {x:1, y:0, scale:1};
+  };
+
+  useEffect(()=>{
+    const el=containerRef.current;if(!el)return;
+    const w=el.clientWidth,h=el.clientHeight;
+    const scene=new THREE.Scene();scene.background=new THREE.Color(0x0a0a1a);scene.fog=new THREE.Fog(0x0a0a1a,50,120);
+    const camera=new THREE.PerspectiveCamera(60,w/h,0.1,1000);
+    const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setSize(w,h);renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));renderer.shadowMap.enabled=true;
+    el.appendChild(renderer.domElement);
+    const gizmo = new AxisGizmo(scene);
+    sRef.current={renderer,scene,camera,meshMap:{},animId:null,gizmo};updCam();
+    const dl=new THREE.DirectionalLight(0xffffff,0.9);dl.position.set(8,12,10);dl.castShadow=true;scene.add(dl);
+    scene.add(new THREE.AmbientLight(0x334466,0.6));scene.add(new THREE.HemisphereLight(0x4488cc,0x223344,0.3));
+    scene.add(new THREE.GridHelper(40,40,0x1a3a6a,0x0d1f3a));scene.add(new THREE.AxesHelper(3));
+
+    const getMouse=(e)=>{const rect=el.getBoundingClientRect();return new THREE.Vector2(((e.clientX-rect.left)/rect.width)*2-1,-((e.clientY-rect.top)/rect.height)*2+1);};
+
+    const onMD=(e)=>{
+      const dr=dragRef.current, vr=vtxRef.current, s=sRef.current;
+      if(e.button===0 && !e.altKey) {
+        const mouse=getMouse(e); const rc=new THREE.Raycaster();rc.setFromCamera(mouse,camera);
+
+        // 1) Check gizmo hit first (all transform modes)
+        if(s.gizmo._visible && (modeRef.current==="move"||modeRef.current==="rotate"||modeRef.current==="scale"||modeRef.current==="vertex")) {
+          const gHits=rc.intersectObjects(s.gizmo.getHitMeshes(),false);
+          if(gHits.length>0){
+            // Prioritize center cube if it was hit
+            const centerHit = gHits.find(h => h.object.userData.axisName === "all");
+            const axName = centerHit ? "all" : gHits[0].object.userData.axisName;
+            s.gizmo.highlight(axName);
+            dr.active=true;
+            dr.axis=axName;
+            dr.startMouse={x:e.clientX,y:e.clientY};
+            const obj=objRef.current.find(o=>o.id===selRef.current);
+
+            if(modeRef.current==="move"){
+              dr.type="gizmo_move";
+              dr.startPos=obj?[...obj.position]:null;
+            } else if(modeRef.current==="rotate"){
+              dr.type="gizmo_rotate";
+              dr.startRot=obj?[...obj.rotation]:null;
+            } else if(modeRef.current==="scale"){
+              dr.type="gizmo_scale";
+              dr.startScale=obj?[...obj.scale]:null;
+            } else if(modeRef.current==="vertex" && vr.selected.size>0){
+              dr.type="gizmo_vertex";
+              // Store starting positions of all selected verts
+              const mesh=s.meshMap[vr.objId];
+              if(mesh){
+                dr.startVerts={};
+                vr.selected.forEach(ui=>{const h=vr.handles[ui];if(h)dr.startVerts[ui]=h.mesh.position.clone();});
+              }
+            }
+            e.preventDefault();e.stopPropagation();return;
+          }
+        }
+
+        // 2) Check vertex handle hit (vertex mode)
+        if(modeRef.current==="vertex" && vr.handles.length>0){
+          const vHits=rc.intersectObjects(vr.handles.map(h=>h.mesh),false);
+          if(vHits.length>0){
+            const idx=vHits[0].object.userData.uniqueIdx;
+            if(e.shiftKey){if(vr.selected.has(idx))vr.selected.delete(idx);else vr.selected.add(idx);}
+            else{if(!vr.selected.has(idx))vr.selected=new Set([idx]);}
+            updateHandleColors();
+            e.preventDefault();return;
+          }
+          // Click empty = deselect
+          if(!e.shiftKey){vr.selected=new Set();updateHandleColors();}
+          return;
+        }
+
+        // 3) Object selection (non-vertex)
+        if(modeRef.current!=="vertex"){
+          const hits=rc.intersectObjects(Object.values(s.meshMap),false);
+          if(hits.length>0){const id=Object.keys(s.meshMap).find(k=>s.meshMap[k]===hits[0].object);if(id&&onSelect)onSelect(id);}
+        }
+      }
+      // Camera orbit
+      if(e.button===1||e.button===2||(e.button===0&&e.altKey)){camR.current.drag=true;camR.current.pv={x:e.clientX,y:e.clientY};e.preventDefault();}
+    };
+
+    const onMM=(e)=>{
+      const dr=dragRef.current, vr=vtxRef.current, s=sRef.current;
+
+      // Gizmo axis dragging
+      if(dr.active && dr.axis){
+        const dx=e.clientX-dr.startMouse.x, dy=e.clientY-dr.startMouse.y;
+        const isAll = dr.axis === "all";
+        let worldDelta = 0;
+
+        if(!isAll){
+          const axisVec = {x:new THREE.Vector3(1,0,0),y:new THREE.Vector3(0,1,0),z:new THREE.Vector3(0,0,1)}[dr.axis];
+          const gizmoPos = s.gizmo.group.position.clone();
+          const screenAxis = axisToScreen(axisVec, gizmoPos, camera, el);
+          const proj = dx*screenAxis.x + dy*screenAxis.y;
+          worldDelta = proj / Math.max(screenAxis.scale, 20);
+        } else {
+          // For "all": horizontal mouse = uniform delta
+          worldDelta = (dx - dy) * 0.02;
+        }
+
+        if(dr.type==="gizmo_move" && dr.startPos){
+          const newPos=[...dr.startPos];
+          if(isAll){
+            // Camera-relative: horizontal=X, vertical=Y
+            newPos[0] = dr.startPos[0] + dx*0.02;
+            newPos[1] = dr.startPos[1] - dy*0.02;
+          } else {
+            const ai={x:0,y:1,z:2}[dr.axis];
+            newPos[ai] = dr.startPos[ai] + worldDelta;
+          }
+          const obj=objRef.current.find(o=>o.id===selRef.current);
+          if(obj && onUpdate) onUpdate({...obj, position:newPos});
+        }
+        else if(dr.type==="gizmo_rotate" && dr.startRot){
+          const newRot=[...dr.startRot];
+          if(isAll){
+            // Horizontal = Y rotation, Vertical = X rotation
+            newRot[0] = dr.startRot[0] - dy*0.5;
+            newRot[1] = dr.startRot[1] + dx*0.5;
+          } else {
+            const ai={x:0,y:1,z:2}[dr.axis];
+            newRot[ai] = dr.startRot[ai] + worldDelta * 120;
+          }
+          const obj=objRef.current.find(o=>o.id===selRef.current);
+          if(obj && onUpdate) onUpdate({...obj, rotation:newRot});
+        }
+        else if(dr.type==="gizmo_scale" && dr.startScale){
+          const newScale=[...dr.startScale];
+          if(isAll){
+            // Uniform scale: drag right/up = bigger, left/down = smaller
+            const uniformDelta = (dx - dy) * 0.01;
+            newScale[0] = Math.max(0.01, dr.startScale[0] + uniformDelta);
+            newScale[1] = Math.max(0.01, dr.startScale[1] + uniformDelta);
+            newScale[2] = Math.max(0.01, dr.startScale[2] + uniformDelta);
+          } else {
+            const ai={x:0,y:1,z:2}[dr.axis];
+            newScale[ai] = Math.max(0.01, dr.startScale[ai] + worldDelta);
+          }
+          const obj=objRef.current.find(o=>o.id===selRef.current);
+          if(obj && onUpdate) onUpdate({...obj, scale:newScale});
+        }
+        else if(dr.type==="gizmo_vertex" && dr.startVerts && vr.objId){
+          const mesh=s.meshMap[vr.objId];
+          if(mesh){
+            const invMat=new THREE.Matrix4().copy(mesh.matrixWorld).invert();
+            let deltaVec;
+            if(isAll){
+              // Use camera right/up for free vertex move
+              const camRight=new THREE.Vector3(); const camUp=new THREE.Vector3();
+              camera.matrixWorld.extractBasis(camRight, camUp, new THREE.Vector3());
+              deltaVec=camRight.multiplyScalar(dx*0.01).add(camUp.multiplyScalar(-dy*0.01));
+            } else {
+              const axisVec={x:new THREE.Vector3(1,0,0),y:new THREE.Vector3(0,1,0),z:new THREE.Vector3(0,0,1)}[dr.axis];
+              deltaVec=axisVec.clone().multiplyScalar(worldDelta);
+            }
+            vr.selected.forEach(ui=>{
+              const startWP=dr.startVerts[ui];
+              if(!startWP)return;
+              const newWP=startWP.clone().add(deltaVec);
+              if(vr.handles[ui])vr.handles[ui].mesh.position.copy(newWP);
+              const localPos=newWP.clone().applyMatrix4(invMat);
+              moveUniqueVert(mesh.geometry,ui,vr.data.map,localPos);
+            });
+            syncVtxWireframe();
+          }
+        }
+        return;
+      }
+
+      // Camera orbit/pan
+      const c=camR.current;
+      if(c.drag){const dx=e.clientX-c.pv.x,dy=e.clientY-c.pv.y;
+        if(e.shiftKey){const r=new THREE.Vector3();camera.getWorldDirection(r);r.cross(camera.up).normalize();const u=camera.up.clone().normalize();c.tgt.add(r.multiplyScalar(-dx*0.02));c.tgt.add(u.multiplyScalar(dy*0.02));}
+        else{c.aX-=dx*0.005;c.aY=Math.max(-1.4,Math.min(1.4,c.aY+dy*0.005));}
+        c.pv={x:e.clientX,y:e.clientY};updCam();}
+    };
+
+    const onMU=(e)=>{
+      const dr=dragRef.current, vr=vtxRef.current, s=sRef.current;
+      if(dr.active){
+        dr.active=false;
+        if(dr.type==="gizmo_vertex" && vr.objId && s.meshMap[vr.objId] && onVertexEdit){
+          onVertexEdit(vr.objId, serializeVerts(s.meshMap[vr.objId].geometry));
+          vr.data=getUniqueVerts(s.meshMap[vr.objId].geometry);
+        }
+        s.gizmo.clearHighlight();
+        dr.type=null;dr.axis=null;dr.startPos=null;dr.startRot=null;dr.startScale=null;dr.startVerts=null;
+        return;
+      }
+      camR.current.drag=false;
+    };
+
+    const onWh=(e)=>{camR.current.d=Math.max(2,Math.min(50,camR.current.d+e.deltaY*0.01));updCam();e.preventDefault();};
+    renderer.domElement.addEventListener("mousedown",onMD);window.addEventListener("mousemove",onMM);window.addEventListener("mouseup",onMU);
+    renderer.domElement.addEventListener("wheel",onWh,{passive:false});renderer.domElement.addEventListener("contextmenu",e=>e.preventDefault());
+
+    const anim=()=>{sRef.current.animId=requestAnimationFrame(anim);gizmo.updateScale(camera);renderer.render(scene,camera);};anim();
+    const ro=new ResizeObserver(()=>{const nw=el.clientWidth,nh=el.clientHeight;camera.aspect=nw/nh;camera.updateProjectionMatrix();renderer.setSize(nw,nh);});ro.observe(el);
+    return()=>{clearVtx();gizmo.dispose();cancelAnimationFrame(sRef.current.animId);ro.disconnect();renderer.dispose();if(el.contains(renderer.domElement))el.removeChild(renderer.domElement);};
+  },[]);
+
+  // Sync meshes
+  useEffect(()=>{
+    const{scene,meshMap}=sRef.current;if(!scene)return;
+    const eIds=new Set(Object.keys(meshMap)),nIds=new Set(objects.map(o=>o.id));
+    eIds.forEach(id=>{if(!nIds.has(id)){scene.remove(meshMap[id]);delete meshMap[id];}});
+    objects.forEach(obj=>{
+      let m=meshMap[obj.id];
+      if(!m){const geo=makeGeometry(obj.type,obj.customVerts);const mt=new THREE.MeshStandardMaterial({color:new THREE.Color(obj.color),roughness:0.7,metalness:0.1,flatShading:true});m=new THREE.Mesh(geo,mt);m.castShadow=true;m.receiveShadow=true;scene.add(m);meshMap[obj.id]=m;}
+      else if(obj.customVerts){const pos=m.geometry.getAttribute("position");const cv=obj.customVerts;let ch=false;for(let i=0;i<Math.min(cv.length,pos.array.length);i++){if(Math.abs(pos.array[i]-cv[i])>0.00001){ch=true;break;}}
+        if(ch){for(let i=0;i<Math.min(cv.length,pos.array.length);i++)pos.array[i]=cv[i];pos.needsUpdate=true;m.geometry.computeVertexNormals();m.geometry.computeBoundingSphere();}}
+      m.position.set(...obj.position);m.rotation.set(...obj.rotation.map(r=>r*Math.PI/180));m.scale.set(...obj.scale);m.material.color.set(obj.color);m.visible=obj.visible;
+      if(obj.id===selectedId){m.material.emissive=new THREE.Color(0x003366);m.material.emissiveIntensity=0.4;}else{m.material.emissive=new THREE.Color(0);m.material.emissiveIntensity=0;}
+    });
+  },[objects,selectedId]);
+
+  // Manage gizmo + vertex handles when mode/selection changes
+  useEffect(()=>{
+    const s=sRef.current, vr=vtxRef.current;
+    if(!s.gizmo) return;
+
+    if((mode==="move"||mode==="rotate"||mode==="scale"||mode==="vertex") && selectedId && s.meshMap[selectedId]){
+      const mesh=s.meshMap[selectedId];
+      mesh.updateMatrixWorld(true);
+
+      if(mode==="vertex"){
+        if(vr.objId!==selectedId) buildVtx(selectedId);
+        if(vr.selected.size>0){
+          const center=new THREE.Vector3();
+          vr.selected.forEach(ui=>{if(vr.handles[ui])center.add(vr.handles[ui].mesh.position);});
+          center.divideScalar(vr.selected.size);
+          s.gizmo.show(center);
+        } else {
+          s.gizmo.show(mesh.position);
+        }
+      } else {
+        if(vr.handles.length>0) clearVtx();
+        s.gizmo.show(mesh.position);
+      }
+    } else {
+      s.gizmo.hide();
+      if(vr.handles.length>0) clearVtx();
+    }
+  },[mode, selectedId, objects]);
+
+  const vr=vtxRef.current;
+  return <div ref={containerRef} style={{width:"100%",height:"100%",position:"relative",overflow:"hidden"}}>
+    <div style={{position:"absolute",bottom:8,left:8,color:C.textDim,fontSize:10,fontFamily:"monospace",pointerEvents:"none",userSelect:"none",textShadow:"0 1px 3px rgba(0,0,0,.8)"}}>
+      {mode==="vertex"?"Click vertex to select | Shift+Click multi-select | Drag axis to move":"Alt+Drag: Orbit | Shift+Drag: Pan | Scroll: Zoom | Drag axis: "+mode.charAt(0).toUpperCase()+mode.slice(1)}
+    </div>
+    {mode==="vertex"&&selectedId&&<div style={{position:"absolute",top:8,right:8,background:"rgba(0,0,0,.7)",padding:"6px 10px",borderRadius:4,border:"1px solid "+C.accent}}>
+      <div style={{color:C.accent,fontSize:10,fontWeight:600,marginBottom:2}}>VERTEX MODE</div>
+      <div style={{color:C.textDim,fontSize:10}}>Vertices: {vr.data?vr.data.verts.length:0} | Selected: {vr.selected?vr.selected.size:0}</div>
+    </div>}
+    {(mode==="move"||mode==="rotate"||mode==="scale")&&selectedId&&<div style={{position:"absolute",top:8,right:8,background:"rgba(0,0,0,.7)",padding:"6px 10px",borderRadius:4,border:"1px solid "+C.accent}}>
+      <div style={{color:C.accent,fontSize:10,fontWeight:600}}>Drag axis arrows to {mode}</div>
+    </div>}
+  </div>;
+}
+
+// ============================================================
+// PROPERTY PANEL
+// ============================================================
+function PropPanel({object:o,onChange,mode}){
+  if(!o)return <div style={{padding:16,color:C.textDim,fontSize:12,textAlign:"center"}}>Select an object</div>;
+  const iS={background:C.bgInput,border:"1px solid "+C.border,color:C.textBright,padding:"3px 6px",borderRadius:2,fontSize:11,width:58,fontFamily:"monospace"};
+  const lS={color:C.textDim,fontSize:10,marginBottom:2,textTransform:"uppercase",letterSpacing:1};
+  const sF=(f,v)=>onChange({...o,[f]:v}); const sV=(f,i,v)=>{const a=[...o[f]];a[i]=parseFloat(v)||0;sF(f,a);};
+  const V3=({f})=><div style={{display:"flex",gap:4,marginBottom:6}}>{["X","Y","Z"].map((l,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:2}}><span style={{color:[C.red,C.green,C.accent][i],fontSize:10,fontWeight:700}}>{l}</span><input style={iS} type="number" step={f==="rotation"?5:0.1} value={o[f][i]} onChange={e=>sV(f,i,e.target.value)}/></div>)}</div>;
+  return <div style={{padding:10}}>
+    <div style={{marginBottom:10}}><div style={lS}>Name</div><input style={{...iS,width:"100%"}} value={o.name} onChange={e=>sF("name",e.target.value)}/></div>
+    <div style={{marginBottom:6}}><div style={lS}>Position</div><V3 f="position"/></div>
+    <div style={{marginBottom:6}}><div style={lS}>Rotation</div><V3 f="rotation"/></div>
+    <div style={{marginBottom:6}}><div style={lS}>Scale</div><V3 f="scale"/></div>
+    <div style={{marginBottom:10}}><div style={lS}>Color</div><div style={{display:"flex",gap:6}}><input type="color" value={o.color} onChange={e=>sF("color",e.target.value)} style={{width:32,height:24,border:"none",cursor:"pointer"}}/><input style={iS} value={o.color} onChange={e=>sF("color",e.target.value)}/></div></div>
+    <label style={{display:"flex",alignItems:"center",gap:6,color:C.text,fontSize:11,cursor:"pointer",marginBottom:8}}><input type="checkbox" checked={o.visible} onChange={e=>sF("visible",e.target.checked)}/> Visible</label>
+    {o.customVerts&&<div style={{marginTop:8,padding:"6px 8px",background:"rgba(0,210,255,.05)",border:"1px solid rgba(0,210,255,.15)",borderRadius:3}}>
+      <div style={{color:C.accent,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:3}}>Custom Geometry</div>
+      <div style={{color:C.textDim,fontSize:10}}>Modified {o.customVerts.length/3} buffer vertices</div>
+      <button onClick={()=>sF("customVerts",null)} style={{...baseBtn,fontSize:9,padding:"2px 6px",marginTop:4,color:C.orange,borderColor:C.orange}}>Reset to Default</button>
+    </div>}
+    {mode==="vertex"&&<div style={{marginTop:10,padding:"6px 8px",background:"rgba(255,215,64,.05)",border:"1px solid rgba(255,215,64,.15)",borderRadius:3}}>
+      <div style={{color:C.yellow,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Vertex Edit Mode</div>
+      <div style={{color:C.textDim,fontSize:10,marginTop:2}}>Click vertices, drag axis arrows to move along one axis.</div>
+    </div>}
+  </div>;
+}
+
+// ============================================================
+// OBJECT LIST
+// ============================================================
+function ObjList({objects,selectedId,onSelect,onDelete}){
+  return <div style={{flex:1,overflowY:"auto"}}>{objects.map(o=>{const I=PRIM_ICONS[o.type]||Ico.Box;const s=o.id===selectedId;return <div key={o.id} onClick={()=>onSelect(o.id)} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 8px",cursor:"pointer",fontSize:11,color:s?C.textBright:C.text,background:s?C.bgActive:"transparent",borderLeft:s?"2px solid "+C.accent:"2px solid transparent"}} onMouseEnter={e=>{if(!s)e.currentTarget.style.background=C.bgHover}} onMouseLeave={e=>{if(!s)e.currentTarget.style.background="transparent"}}>
+    <span style={{color:s?C.accent:C.textDim,display:"flex"}}><I/></span>
+    <span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.name}</span>
+    {o.customVerts&&<span style={{color:C.orange,fontSize:8}} title="Custom vertices">{"\u2726"}</span>}
+    <button onClick={e=>{e.stopPropagation();onDelete(o.id)}} style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",padding:2,display:"flex"}} onMouseEnter={e=>e.currentTarget.style.color=C.red} onMouseLeave={e=>e.currentTarget.style.color=C.textDim}><Ico.Trash/></button>
+  </div>;})}</div>;
+}
+
+// ============================================================
+// EVENT EDITOR
+// ============================================================
+function EventEditor({events,setEvents}){
+  const[cp,setCp]=useState(null);const[ap,setAp]=useState(null);
+  const addEv=()=>setEvents([...events,{id:uid(),enabled:true,conditions:[],actions:[]}]);
+  const rmEv=i=>setEvents(events.filter((_,j)=>j!==i));
+  const togEv=i=>{const n=[...events];n[i]={...n[i],enabled:!n[i].enabled};setEvents(n);};
+  const addC=(ei,cid)=>{const c=CONDITIONS.find(x=>x.id===cid);const n=[...events];n[ei]={...n[ei],conditions:[...n[ei].conditions,{id:uid(),type:cid,label:c.label,params:(c.params||[]).reduce((a,p)=>({...a,[p.n]:p.t==="number"?0:""}),{}),negate:false}]};setEvents(n);setCp(null);};
+  const addA=(ei,aid)=>{const a=ACTIONS.find(x=>x.id===aid);const n=[...events];n[ei]={...n[ei],actions:[...n[ei].actions,{id:uid(),type:aid,label:a.label,params:(a.params||[]).reduce((ac,p)=>({...ac,[p.n]:p.t==="number"?0:""}),{})}]};setEvents(n);setAp(null);};
+  const rmC=(ei,ci)=>{const n=[...events];n[ei]={...n[ei],conditions:n[ei].conditions.filter((_,j)=>j!==ci)};setEvents(n);};
+  const rmA=(ei,ai)=>{const n=[...events];n[ei]={...n[ei],actions:n[ei].actions.filter((_,j)=>j!==ai)};setEvents(n);};
+  const upCP=(ei,ci,p,v)=>{const n=[...events];const cs=[...n[ei].conditions];cs[ci]={...cs[ci],params:{...cs[ci].params,[p]:v}};n[ei]={...n[ei],conditions:cs};setEvents(n);};
+  const upAP=(ei,ai,p,v)=>{const n=[...events];const as=[...n[ei].actions];as[ai]={...as[ai],params:{...as[ai].params,[p]:v}};n[ei]={...n[ei],actions:as};setEvents(n);};
+  const cS={padding:"4px 6px",fontSize:11,borderBottom:"1px solid "+C.border,borderRight:"1px solid "+C.border};
+  const piS={background:C.bgInput,border:"1px solid "+C.border,color:C.accent,padding:"1px 4px",borderRadius:2,fontSize:10,width:50,fontFamily:"monospace",marginLeft:2};
+  const cats=items=>[...new Set(items.map(i=>i.cat))];
+  const Picker=({items,onPick,onClose})=><div style={{position:"absolute",top:"100%",left:0,zIndex:100,background:C.bgDark,border:"1px solid "+C.borderLight,borderRadius:4,boxShadow:"0 8px 32px rgba(0,0,0,.6)",minWidth:240,maxHeight:320,overflowY:"auto"}}>
+    <div style={{padding:"6px 8px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between"}}><span style={{color:C.textBright,fontSize:11,fontWeight:600}}>Select</span><button onClick={onClose} style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize:12}}>{"\u2715"}</button></div>
+    {cats(items).map(cat=><div key={cat}><div style={{padding:"4px 8px",color:C.accent,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,background:"rgba(0,210,255,.05)"}}>{cat}</div>{items.filter(i=>i.cat===cat).map(item=><div key={item.id} onClick={()=>onPick(item.id)} style={{padding:"5px 12px",color:C.text,fontSize:11,cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background=C.bgHover} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>{item.label}</div>)}</div>)}</div>;
+  const Tag=({label,params,color,onRm,onP})=><span style={{display:"inline-flex",alignItems:"center",gap:2,background:color==="y"?"rgba(255,215,64,.1)":"rgba(0,230,118,.1)",border:"1px solid "+(color==="y"?"rgba(255,215,64,.2)":"rgba(0,230,118,.2)"),padding:"2px 6px",borderRadius:3,fontSize:10,color:color==="y"?C.yellow:C.green}}>
+    {label}{params&&Object.entries(params).map(([k,v])=><input key={k} style={piS} title={k} placeholder={k} value={v} onChange={e=>onP(k,e.target.value)} onClick={e=>e.stopPropagation()}/>)}
+    <span onClick={onRm} style={{cursor:"pointer",marginLeft:2,color:C.textDim,fontSize:9}} onMouseEnter={e=>e.currentTarget.style.color=C.red} onMouseLeave={e=>e.currentTarget.style.color=C.textDim}>{"\u2715"}</span></span>;
+  const AddB=({onClick:oc,color})=><span onClick={oc} style={{display:"inline-flex",background:color==="y"?"rgba(255,215,64,.05)":"rgba(0,230,118,.05)",border:"1px dashed "+(color==="y"?"rgba(255,215,64,.2)":"rgba(0,230,118,.2)"),padding:"2px 6px",borderRadius:3,fontSize:10,color:C.textDim,cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.color=color==="y"?C.yellow:C.green} onMouseLeave={e=>e.currentTarget.style.color=C.textDim}>+ Add</span>;
+  return <div style={{height:"100%",display:"flex",flexDirection:"column"}}>
+    <div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 10px",borderBottom:"1px solid "+C.border,background:C.bgDark}}>
+      <button onClick={addEv} style={baseBtn}><Ico.Plus/> New Event</button><div style={{flex:1}}/><span style={{color:C.textDim,fontSize:10}}>{events.length} events</span></div>
+    <div style={{flex:1,overflowY:"auto",overflowX:"auto"}}>
+      <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr style={{background:C.bgDark,position:"sticky",top:0,zIndex:10}}>
+        <th style={{...cS,width:30,color:C.textDim,fontSize:10}}>#</th><th style={{...cS,width:24}}></th>
+        <th style={{...cS,color:C.yellow,fontWeight:600,fontSize:10,textTransform:"uppercase",textAlign:"left"}}>Conditions</th>
+        <th style={{...cS,color:C.green,fontWeight:600,fontSize:10,textTransform:"uppercase",textAlign:"left"}}>Actions</th>
+        <th style={{...cS,width:30}}></th>
+      </tr></thead><tbody>{events.map((ev,i)=><tr key={ev.id}>
+        <td style={{...cS,color:C.textDim,textAlign:"center",fontSize:10}}>{i+1}</td>
+        <td style={{...cS,textAlign:"center"}}><input type="checkbox" checked={ev.enabled} onChange={()=>togEv(i)} style={{cursor:"pointer"}}/></td>
+        <td style={{...cS,verticalAlign:"top",padding:4,position:"relative"}}><div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+          {ev.conditions.map((c,ci)=><Tag key={c.id} label={c.label} params={c.params} color="y" onRm={()=>rmC(i,ci)} onP={(p,v)=>upCP(i,ci,p,v)}/>)}
+          <div style={{position:"relative",display:"inline-flex"}}><AddB onClick={()=>setCp(cp===i?null:i)} color="y"/>{cp===i&&<Picker items={CONDITIONS} onPick={id=>addC(i,id)} onClose={()=>setCp(null)}/>}</div>
+        </div></td>
+        <td style={{...cS,verticalAlign:"top",padding:4,position:"relative"}}><div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+          {ev.actions.map((a,ai)=><Tag key={a.id} label={a.label} params={a.params} color="g" onRm={()=>rmA(i,ai)} onP={(p,v)=>upAP(i,ai,p,v)}/>)}
+          <div style={{position:"relative",display:"inline-flex"}}><AddB onClick={()=>setAp(ap===i?null:i)} color="g"/>{ap===i&&<Picker items={ACTIONS} onPick={id=>addA(i,id)} onClose={()=>setAp(null)}/>}</div>
+        </div></td>
+        <td style={{...cS,textAlign:"center"}}><button onClick={()=>rmEv(i)} style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",padding:2,display:"flex"}} onMouseEnter={e=>e.currentTarget.style.color=C.red} onMouseLeave={e=>e.currentTarget.style.color=C.textDim}><Ico.Trash/></button></td>
+      </tr>)}</tbody></table>
+      {events.length===0&&<div style={{padding:40,textAlign:"center",color:C.textDim,fontSize:12}}>No events. Click "New Event" to add game logic.</div>}
+    </div>
+  </div>;
+}
+
+// ============================================================
+// ANIMATION TIMELINE
+// ============================================================
+function AnimTimeline({objects,selectedId,keyframes,setKeyframes}){
+  const[cf,setCf]=useState(0);const[tf]=useState(60);const[pl,setPl]=useState(false);const pr=useRef(null);
+  const so=objects.find(o=>o.id===selectedId);
+  useEffect(()=>{if(pl)pr.current=setInterval(()=>setCf(f=>(f+1)%tf),1000/24);else clearInterval(pr.current);return()=>clearInterval(pr.current);},[pl,tf]);
+  const addK=()=>{if(!so)return;setKeyframes([...keyframes,{id:uid(),objectId:so.id,frame:cf,position:[...so.position],rotation:[...so.rotation],scale:[...so.scale]}]);};
+  return <div style={{height:"100%",display:"flex",flexDirection:"column"}}>
+    <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",borderBottom:"1px solid "+C.border,background:C.bgDark}}>
+      <button onClick={()=>setCf(0)} style={baseBtn}><Ico.Stop/></button>
+      <button onClick={()=>setPl(!pl)} style={{...baseBtn,color:pl?C.orange:C.green}}>{pl?<Ico.Pause/>:<Ico.Play/>}</button>
+      <span style={{color:C.textDim,fontSize:10,fontFamily:"monospace"}}>Frame: <span style={{color:C.accent}}>{cf}</span>/{tf}</span>
+      <div style={{flex:1}}/>
+      <button onClick={addK} style={{...baseBtn,borderColor:so?C.accent:C.border,color:so?C.accent:C.textDim}}><Ico.Plus/> Keyframe</button>
+    </div>
+    <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+      <div style={{width:140,borderRight:"1px solid "+C.border,overflowY:"auto"}}>
+        {objects.map(o=><div key={o.id} style={{padding:"4px 8px",fontSize:11,color:o.id===selectedId?C.textBright:C.text,background:o.id===selectedId?C.bgActive:"transparent",borderBottom:"1px solid "+C.border,height:28,display:"flex",alignItems:"center"}}>{o.name}</div>)}
+      </div>
+      <div style={{flex:1,overflowX:"auto",overflowY:"auto"}}>
+        <div style={{display:"flex",borderBottom:"1px solid "+C.border,position:"sticky",top:0,background:C.bgDark,zIndex:5,height:22,minWidth:tf*12}}>
+          {Array.from({length:tf},(_,i)=><div key={i} onClick={()=>setCf(i)} style={{width:12,minWidth:12,textAlign:"center",fontSize:8,cursor:"pointer",background:i===cf?C.accent:"transparent",color:i===cf?C.bgDark:(i%5===0?C.textDim:"transparent"),fontFamily:"monospace",lineHeight:"22px"}}>{i%5===0?i:"\u00b7"}</div>)}
+        </div>
+        {objects.map(o=>{const ks=keyframes.filter(k=>k.objectId===o.id);return <div key={o.id} style={{height:28,borderBottom:"1px solid "+C.border,position:"relative",minWidth:tf*12,background:o.id===selectedId?"rgba(0,210,255,.03)":"transparent"}}>
+          {ks.map(k=><div key={k.id} style={{position:"absolute",left:k.frame*12+2,top:6,width:8,height:8,borderRadius:"50%",background:C.orange,border:"2px solid "+C.yellow,cursor:"pointer"}} title={"Frame "+k.frame} onClick={()=>setCf(k.frame)} onDoubleClick={()=>setKeyframes(keyframes.filter(x=>x.id!==k.id))}/>)}
+          <div style={{position:"absolute",left:cf*12+5,top:0,width:2,height:"100%",background:C.accent,opacity:.6,pointerEvents:"none"}}/>
+        </div>;})}
+      </div>
+    </div>
+  </div>;
+}
+
+// ============================================================
+// APP
+// ============================================================
+function App(){
+  const[tab,setTab]=useState("model");
+  const[objects,setObjects]=useState([
+    {...createPrim("box","Ground"),position:[0,-0.5,0],scale:[10,0.2,10],color:"#2d5016"},
+    {...createPrim("box","Wall_1"),position:[-4,1,0],scale:[0.3,2,6],color:"#8b7355"},
+    {...createPrim("box","Building"),position:[2,1.5,-2],scale:[3,3,3],color:"#556677"},
+    {...createPrim("cylinder","Tower"),position:[-2,2,3],scale:[1,4,1],color:"#996644"},
+    {...createPrim("cone","Roof"),position:[-2,4.5,3],scale:[1.5,1.5,1.5],color:"#cc3333"},
+    {...createPrim("sphere","Sphere_1"),position:[4,0.5,3],scale:[1,1,1],color:"#3388cc"},
+  ]);
+  const[selId,setSelId]=useState(null);
+  const[tfMode,setTfMode]=useState("move");
+  const[events,setEvents]=useState([
+    {id:uid(),enabled:true,conditions:[{id:uid(),type:"always",label:"Always",params:{},negate:false}],actions:[{id:uid(),type:"rotate_object",label:"Rotate Object",params:{object:"Sphere_1",x:"0",y:"1",z:"0"}}]},
+    {id:uid(),enabled:true,conditions:[{id:uid(),type:"key_down",label:"Key Down",params:{key:"E"},negate:false}],actions:[{id:uid(),type:"move_object",label:"Move Object",params:{object:"Building",x:"0",y:"0.05",z:"0"}}]},
+    {id:uid(),enabled:true,conditions:[{id:uid(),type:"key_pressed",label:"Key Pressed",params:{key:"R"},negate:false}],actions:[{id:uid(),type:"restart_frame",label:"Restart Frame",params:{}}]},
+  ]);
+  const[keyframes,setKeyframes]=useState([]);
+  const[projName,setProjName]=useState("My Retro Game");
+  const[isRun,setIsRun]=useState(false);
+  const[openMenu,setOpenMenu]=useState(null);
+  const[showGrid,setShowGrid]=useState(true);
+  const[clipboard,setClipboard]=useState(null);
+  const[undoStack,setUndoStack]=useState([]);
+  const[redoStack,setRedoStack]=useState([]);
+  const[showAbout,setShowAbout]=useState(false);
+  const[showShortcuts,setShowShortcuts]=useState(false);
+  const[statusMsg,setStatusMsg]=useState(null);
+  const fileInputRef=useRef(null);
+
+  // Status message helper
+  const showStatus=(msg,dur=2500)=>{setStatusMsg(msg);setTimeout(()=>setStatusMsg(null),dur);};
+
+  const selObj=objects.find(o=>o.id===selId);
+  const updObj=u=>setObjects(objects.map(o=>o.id===u.id?u:o));
+  const addObj=t=>{const o=createPrim(t);setObjects([...objects,o]);setSelId(o.id);};
+  const delObj=id=>{setObjects(objects.filter(o=>o.id!==id));if(selId===id)setSelId(null);};
+  const handleVertexEdit=(objId,customVerts)=>{setObjects(prev=>prev.map(o=>o.id===objId?{...o,customVerts}:o));};
+  const handleRun=()=>setIsRun(!isRun);
+
+  // Undo support
+  const pushUndo=()=>{setUndoStack(s=>[...s.slice(-30),{objects:JSON.parse(JSON.stringify(objects)),events:JSON.parse(JSON.stringify(events)),keyframes:JSON.parse(JSON.stringify(keyframes))}]);setRedoStack([]);};
+  const doUndo=()=>{if(undoStack.length===0)return;const prev=undoStack[undoStack.length-1];setRedoStack(s=>[...s,{objects:JSON.parse(JSON.stringify(objects)),events:JSON.parse(JSON.stringify(events)),keyframes:JSON.parse(JSON.stringify(keyframes))}]);setObjects(prev.objects);setEvents(prev.events);setKeyframes(prev.keyframes);setUndoStack(s=>s.slice(0,-1));};
+  const doRedo=()=>{if(redoStack.length===0)return;const next=redoStack[redoStack.length-1];setUndoStack(s=>[...s,{objects:JSON.parse(JSON.stringify(objects)),events:JSON.parse(JSON.stringify(events)),keyframes:JSON.parse(JSON.stringify(keyframes))}]);setObjects(next.objects);setEvents(next.events);setKeyframes(next.keyframes);setRedoStack(s=>s.slice(0,-1));};
+
+  // File actions
+  const newProject=()=>{if(confirm("Start new project? Unsaved changes will be lost.")){pushUndo();setObjects([]);setEvents([]);setKeyframes([]);setSelId(null);setProjName("New Project");}};
+  const anchorDownload=(blob,filename)=>{
+    const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
+  };
+  const saveProject=async()=>{
+    const data=JSON.stringify({version:1,name:projName,objects,events,keyframes},null,2);
+    const fn=(projName||"project")+".r3d.json";
+    try{
+      const handle=await window.showSaveFilePicker({suggestedName:fn,types:[{description:"Retro 3D Project",accept:{"application/json":[".r3d.json",".json"]}}]});
+      const w=await handle.createWritable();await w.write(data);await w.close();
+      showStatus("\u2713 Saved: "+handle.name);return;
+    }catch(e){if(e.name==="AbortError")return;}
+    try{anchorDownload(new Blob([data],{type:"application/json"}),fn);showStatus("\u2713 Downloaded: "+fn);}catch(e){showStatus("Save failed: "+e.message);}
+  };
+  const loadProject=async()=>{
+    try{
+      const[handle]=await window.showOpenFilePicker({types:[{description:"Retro 3D Project",accept:{"application/json":[".r3d.json",".json"]}}]});
+      const file=await handle.getFile();const text=await file.text();
+      const data=JSON.parse(text);pushUndo();
+      if(data.name)setProjName(data.name);if(data.objects)setObjects(data.objects);if(data.events)setEvents(data.events);if(data.keyframes)setKeyframes(data.keyframes);
+      setSelId(null);showStatus("\u2713 Loaded: "+file.name);return;
+    }catch(e){if(e.name==="AbortError")return;}
+    fileInputRef.current?.click();
+  };
+  const loadProjectFromInput=(e)=>{const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=(ev)=>{try{const data=JSON.parse(ev.target.result);pushUndo();if(data.name)setProjName(data.name);if(data.objects)setObjects(data.objects);if(data.events)setEvents(data.events);if(data.keyframes)setKeyframes(data.keyframes);setSelId(null);showStatus("\u2713 Loaded: "+file.name);}catch(err){showStatus("Error: "+err.message);}};reader.readAsText(file);e.target.value="";};
+  const exportHTML=async()=>{
+    const html=document.documentElement.outerHTML;
+    const fn=(projName||"game")+".html";
+    try{
+      const handle=await window.showSaveFilePicker({suggestedName:fn,types:[{description:"HTML File",accept:{"text/html":[".html"]}}]});
+      const w=await handle.createWritable();await w.write("<!DOCTYPE html>"+html);await w.close();
+      showStatus("\u2713 Exported: "+handle.name);return;
+    }catch(e){if(e.name==="AbortError")return;}
+    try{anchorDownload(new Blob(["<!DOCTYPE html>"+html],{type:"text/html"}),fn);showStatus("\u2713 Exported: "+fn);}catch(e){showStatus("Export failed: "+e.message);}
+  };
+
+  // Edit actions
+  const doDuplicate=()=>{if(!selObj)return;pushUndo();const dup={...JSON.parse(JSON.stringify(selObj)),id:uid(),name:selObj.name+"_copy"};dup.position=[dup.position[0]+1,dup.position[1],dup.position[2]];setObjects([...objects,dup]);setSelId(dup.id);};
+  const doCopy=()=>{if(selObj)setClipboard(JSON.parse(JSON.stringify(selObj)));};
+  const doPaste=()=>{if(!clipboard)return;pushUndo();const p={...JSON.parse(JSON.stringify(clipboard)),id:uid(),name:clipboard.name+"_paste"};p.position=[p.position[0]+1,p.position[1],p.position[2]];setObjects([...objects,p]);setSelId(p.id);};
+  const doDelete=()=>{if(!selId)return;pushUndo();delObj(selId);};
+  const doSelectAll=()=>{if(objects.length>0)setSelId(objects[0].id);};
+  const doResetTransform=()=>{if(!selObj)return;pushUndo();updObj({...selObj,position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]});};
+
+  // Keyboard shortcuts
+  useEffect(()=>{
+    const onKey=(e)=>{
+      if(e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA")return;
+      const ctrl=e.ctrlKey||e.metaKey;
+      if(ctrl&&e.key==="z"){e.preventDefault();if(e.shiftKey)doRedo();else doUndo();}
+      if(ctrl&&e.key==="y"){e.preventDefault();doRedo();}
+      if(ctrl&&e.key==="s"){e.preventDefault();saveProject();}
+      if(ctrl&&e.key==="o"){e.preventDefault();loadProject();}
+      if(ctrl&&e.key==="d"){e.preventDefault();doDuplicate();}
+      if(ctrl&&e.key==="c"){e.preventDefault();doCopy();}
+      if(ctrl&&e.key==="v"){e.preventDefault();doPaste();}
+      if(e.key==="Delete"){doDelete();}
+      if(e.key==="F5"){e.preventDefault();handleRun();}
+      if(!ctrl&&!isRun){
+        if(e.key==="g"||e.key==="G")setShowGrid(g=>!g);
+      }
+    };
+    window.addEventListener("keydown",onKey);return()=>window.removeEventListener("keydown",onKey);
+  });
+
+  const tabs=[{id:"model",label:"Model Editor",icon:"\u{1f537}"},{id:"events",label:"Event Editor",icon:"\u26a1"},{id:"animation",label:"Animation",icon:"\u{1f3ac}"}];
+  const modeButtons=[{m:"move",I:Ico.Move,l:"Move"},{m:"rotate",I:Ico.Rotate,l:"Rot"},{m:"scale",I:Ico.Scale,l:"Scale"},{m:"vertex",I:Ico.Vertex,l:"Vertex"}];
+
+  // Menu definitions
+  const menuDefs={
+    File:[
+      {label:"New Project",shortcut:"",action:newProject},
+      {label:"---"},
+      {label:"Save Project...",shortcut:"Ctrl+S",action:saveProject},
+      {label:"Open Project...",shortcut:"Ctrl+O",action:loadProject},
+      {label:"---"},
+      {label:"Export as HTML...",shortcut:"",action:exportHTML},
+    ],
+    Edit:[
+      {label:"Undo",shortcut:"Ctrl+Z",action:doUndo,disabled:undoStack.length===0},
+      {label:"Redo",shortcut:"Ctrl+Shift+Z",action:doRedo,disabled:redoStack.length===0},
+      {label:"---"},
+      {label:"Copy Object",shortcut:"Ctrl+C",action:doCopy,disabled:!selObj},
+      {label:"Paste Object",shortcut:"Ctrl+V",action:doPaste,disabled:!clipboard},
+      {label:"Duplicate Object",shortcut:"Ctrl+D",action:doDuplicate,disabled:!selObj},
+      {label:"---"},
+      {label:"Delete Object",shortcut:"Delete",action:doDelete,disabled:!selObj},
+      {label:"Select All",shortcut:"",action:doSelectAll,disabled:objects.length===0},
+      {label:"---"},
+      {label:"Reset Transform",shortcut:"",action:doResetTransform,disabled:!selObj},
+    ],
+    View:[
+      {label:"Model Editor",shortcut:"",action:()=>setTab("model"),checked:tab==="model"},
+      {label:"Event Editor",shortcut:"",action:()=>setTab("events"),checked:tab==="events"},
+      {label:"Animation",shortcut:"",action:()=>setTab("animation"),checked:tab==="animation"},
+      {label:"---"},
+      {label:"Toggle Grid",shortcut:"G",action:()=>setShowGrid(!showGrid),checked:showGrid},
+    ],
+    Insert:[
+      ...PRIM_TYPES.map(t=>({label:t.charAt(0).toUpperCase()+t.slice(1),shortcut:"",action:()=>addObj(t)})),
+    ],
+    Run:[
+      {label:isRun?"Stop Game":"Run Game",shortcut:"F5",action:handleRun},
+      {label:"---"},
+      {label:"Run from Start",shortcut:"",action:()=>{if(!isRun)setIsRun(true);}},
+    ],
+    Tools:[
+      {label:"Move Tool",shortcut:"W",action:()=>setTfMode("move"),checked:tfMode==="move"},
+      {label:"Rotate Tool",shortcut:"E",action:()=>setTfMode("rotate"),checked:tfMode==="rotate"},
+      {label:"Scale Tool",shortcut:"R",action:()=>setTfMode("scale"),checked:tfMode==="scale"},
+      {label:"Vertex Tool",shortcut:"V",action:()=>setTfMode("vertex"),checked:tfMode==="vertex"},
+    ],
+    Help:[
+      {label:"Keyboard Shortcuts",shortcut:"",action:()=>setShowShortcuts(true)},
+      {label:"About Retro 3D Studio",shortcut:"",action:()=>setShowAbout(true)},
+    ],
+  };
+
+  // Close menu on outside click
+  useEffect(()=>{
+    if(!openMenu)return;
+    const close=()=>setOpenMenu(null);
+    setTimeout(()=>window.addEventListener("click",close),0);
+    return()=>window.removeEventListener("click",close);
+  },[openMenu]);
+
+  return <div style={{width:"100%",height:"100vh",display:"flex",flexDirection:"column",background:C.bg,color:C.text,fontFamily:"'Consolas','Fira Code','Courier New',monospace",fontSize:12,overflow:"hidden",userSelect:"none"}}>
+    {/* HIDDEN FILE INPUT */}
+    <input ref={fileInputRef} type="file" accept=".json,.r3d.json" style={{display:"none"}} onChange={loadProjectFromInput}/>
+    {/* ABOUT MODAL */}
+    {showAbout&&<div onClick={()=>setShowAbout(false)} style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,.7)",zIndex:20000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:C.bgPanel,border:"1px solid "+C.borderLight,borderRadius:8,padding:24,maxWidth:360,boxShadow:"0 16px 64px rgba(0,0,0,.6)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+          <div style={{width:28,height:28,borderRadius:4,background:"linear-gradient(135deg,"+C.accent+","+C.purple+")",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:900,color:C.bgDark}}>R</div>
+          <div><div style={{color:C.textBright,fontWeight:700,fontSize:14}}>Retro 3D Studio</div><div style={{color:C.textDim,fontSize:10}}>Version 0.3</div></div>
+        </div>
+        <div style={{color:C.text,fontSize:11,lineHeight:1.6,marginBottom:12}}>A browser-based 3D game creation tool inspired by Freescape engine and Clickteam Fusion. Create low-poly 3D models, design scenes, program game logic with visual events, and run games in the browser.</div>
+        <div style={{color:C.textDim,fontSize:10,marginBottom:16}}>Built with React + Three.js</div>
+        <button onClick={()=>setShowAbout(false)} style={{...baseBtn,borderColor:C.accent,color:C.accent,padding:"6px 16px"}}>Close</button>
+      </div>
+    </div>}
+    {/* SHORTCUTS MODAL */}
+    {showShortcuts&&<div onClick={()=>setShowShortcuts(false)} style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",background:"rgba(0,0,0,.7)",zIndex:20000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:C.bgPanel,border:"1px solid "+C.borderLight,borderRadius:8,padding:24,maxWidth:420,boxShadow:"0 16px 64px rgba(0,0,0,.6)"}}>
+        <div style={{color:C.textBright,fontWeight:700,fontSize:14,marginBottom:12}}>Keyboard Shortcuts</div>
+        {[["Ctrl+S","Save Project"],["Ctrl+O","Open Project"],["Ctrl+Z","Undo"],["Ctrl+Shift+Z / Ctrl+Y","Redo"],["Ctrl+C","Copy Object"],["Ctrl+V","Paste Object"],["Ctrl+D","Duplicate Object"],["Delete","Delete Object"],["Alt+Drag","Orbit Camera"],["Shift+Drag","Pan Camera"],["Scroll","Zoom"],["F5","Run/Stop Game"]].map(([k,d])=>
+          <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid "+C.border}}>
+            <span style={{color:C.text,fontSize:11}}>{d}</span>
+            <span style={{color:C.accent,fontSize:10,fontFamily:"monospace",background:C.bgInput,padding:"1px 6px",borderRadius:2}}>{k}</span>
+          </div>
+        )}
+        <button onClick={()=>setShowShortcuts(false)} style={{...baseBtn,borderColor:C.accent,color:C.accent,padding:"6px 16px",marginTop:12}}>Close</button>
+      </div>
+    </div>}
+    {/* STATUS TOAST */}
+    {statusMsg&&<div style={{position:"fixed",bottom:40,left:"50%",transform:"translateX(-50%)",background:C.bgPanel,border:"1px solid "+C.accent,color:C.accent,padding:"8px 20px",borderRadius:6,fontSize:12,fontWeight:600,zIndex:20001,boxShadow:"0 4px 20px rgba(0,0,0,.5)",pointerEvents:"none"}}>{statusMsg}</div>}
+    {/* MENU BAR */}
+    <div style={{display:"flex",alignItems:"center",height:34,minHeight:34,background:"linear-gradient(180deg,"+C.bgPanel+","+C.bgDark+")",borderBottom:"1px solid "+C.border,padding:"0 10px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:6,marginRight:16}}>
+        <div style={{width:20,height:20,borderRadius:3,background:"linear-gradient(135deg,"+C.accent+","+C.purple+")",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900,color:C.bgDark}}>R</div>
+        <span style={{color:C.textBright,fontWeight:700,fontSize:12}}>RETRO 3D STUDIO</span>
+      </div>
+      {Object.keys(menuDefs).map(m=><div key={m} style={{position:"relative"}}>
+        <div onClick={e=>{e.stopPropagation();setOpenMenu(openMenu===m?null:m);}} onMouseEnter={()=>{if(openMenu)setOpenMenu(m);}}
+          style={{padding:"4px 10px",fontSize:11,color:openMenu===m?C.textBright:C.textDim,cursor:"pointer",borderRadius:2,background:openMenu===m?C.bgActive:"transparent"}}
+          onMouseLeave={e=>{if(openMenu!==m){e.currentTarget.style.background="transparent";e.currentTarget.style.color=C.textDim;}}}>{m}</div>
+        {openMenu===m&&<div style={{position:"absolute",top:"100%",left:0,zIndex:15000,background:C.bgDark,border:"1px solid "+C.borderLight,borderRadius:4,boxShadow:"0 8px 32px rgba(0,0,0,.7)",minWidth:220,paddingTop:2,paddingBottom:2}} onClick={e=>e.stopPropagation()}>
+          {menuDefs[m].map((item,i)=>item.label==="---"
+            ?<div key={i} style={{height:1,background:C.border,margin:"3px 8px"}}/>
+            :<div key={i} onClick={()=>{if(!item.disabled){item.action();setOpenMenu(null);}}}
+              style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 12px",fontSize:11,color:item.disabled?C.textDim:C.text,cursor:item.disabled?"default":"pointer",opacity:item.disabled?0.4:1}}
+              onMouseEnter={e=>{if(!item.disabled)e.currentTarget.style.background=C.bgHover;}} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              <span style={{display:"flex",alignItems:"center",gap:6}}>
+                {item.checked!==undefined&&<span style={{color:item.checked?C.accent:"transparent",fontSize:10}}>{"\u2713"}</span>}
+                {item.label}
+              </span>
+              {item.shortcut&&<span style={{color:C.textDim,fontSize:9,fontFamily:"monospace",marginLeft:16}}>{item.shortcut}</span>}
+            </div>
+          )}
+        </div>}
+      </div>)}
+      <div style={{flex:1}}/>
+      <input value={projName} onChange={e=>setProjName(e.target.value)} style={{background:"transparent",border:"none",color:C.textDim,fontSize:11,textAlign:"right",outline:"none",width:150}}/>
+      <div style={{marginLeft:10}}>
+        <button onClick={handleRun} style={{...baseBtn,background:isRun?"rgba(255,82,82,.15)":"rgba(0,230,118,.15)",borderColor:isRun?C.red:C.green,color:isRun?C.red:C.green,fontWeight:600}}>
+          {isRun?<React.Fragment><Ico.Stop/> Stop</React.Fragment>:<React.Fragment><Ico.Play/> Run Game</React.Fragment>}
+        </button>
+      </div>
+    </div>
+    {/* TABS */}
+    <div style={{display:"flex",height:32,minHeight:32,background:C.bgDark,borderBottom:"1px solid "+C.border}}>
+      {tabs.map(t=><div key={t.id} onClick={()=>setTab(t.id)} style={{padding:"0 16px",display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:11,fontWeight:tab===t.id?600:400,color:tab===t.id?C.textBright:C.textDim,background:tab===t.id?C.bgPanel:"transparent",borderBottom:tab===t.id?"2px solid "+C.accent:"2px solid transparent",borderRight:"1px solid "+C.border}}><span style={{fontSize:13}}>{t.icon}</span>{t.label}</div>)}
+    </div>
+    {/* CONTENT */}
+    <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+      {tab==="model"&&<React.Fragment>
+        <div style={{width:200,minWidth:200,background:C.bgPanel,borderRight:"1px solid "+C.border,display:"flex",flexDirection:"column"}}>
+          <div style={{padding:6,borderBottom:"1px solid "+C.border}}>
+            <div style={{color:C.textDim,fontSize:9,textTransform:"uppercase",letterSpacing:1,marginBottom:4,fontWeight:600}}>Add Primitive</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:3}}>
+              {PRIM_TYPES.map(t=>{const I=PRIM_ICONS[t];return <button key={t} onClick={()=>addObj(t)} style={{...baseBtn,flexDirection:"column",padding:"6px 4px",justifyContent:"center",fontSize:9,gap:2}} onMouseEnter={e=>{e.currentTarget.style.borderColor=C.accent}} onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border}}><I/><span style={{textTransform:"capitalize"}}>{t}</span></button>;})}
+            </div>
+          </div>
+          <div style={{padding:6,borderBottom:"1px solid "+C.border}}>
+            <div style={{color:C.textDim,fontSize:9,textTransform:"uppercase",letterSpacing:1,marginBottom:4,fontWeight:600}}>Transform Mode</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3}}>
+              {modeButtons.map(({m,I,l})=><button key={m} onClick={()=>setTfMode(m)} style={{...baseBtn,justifyContent:"center",background:tfMode===m?C.bgActive:C.bgPanel,borderColor:tfMode===m?(m==="vertex"?C.yellow:C.accent):C.border,color:tfMode===m?(m==="vertex"?C.yellow:C.accent):C.text}}><I/><span style={{fontSize:9}}>{l}</span></button>)}
+            </div>
+          </div>
+          <div style={{color:C.textDim,fontSize:9,textTransform:"uppercase",letterSpacing:1,padding:"6px 8px",fontWeight:600}}>Objects ({objects.length})</div>
+          <ObjList objects={objects} selectedId={selId} onSelect={setSelId} onDelete={delObj}/>
+        </div>
+        <div style={{flex:1,position:"relative"}}>
+          <Viewport3D objects={objects} selectedId={selId} onSelect={setSelId} onUpdate={updObj} mode={tfMode} onVertexEdit={handleVertexEdit}/>
+          <div style={{position:"absolute",top:8,left:8,display:"flex",gap:4}}>
+            <span style={{background:"rgba(0,0,0,.6)",padding:"3px 8px",borderRadius:3,fontSize:10,color:C.textDim}}>Perspective</span>
+            <span style={{background:"rgba(0,0,0,.6)",padding:"3px 8px",borderRadius:3,fontSize:10,color:tfMode==="vertex"?C.yellow:C.accent}}>{tfMode.toUpperCase()}</span>
+          </div>
+        </div>
+        <div style={{width:220,minWidth:220,background:C.bgPanel,borderLeft:"1px solid "+C.border,display:"flex",flexDirection:"column"}}>
+          <div style={{padding:"6px 10px",borderBottom:"1px solid "+C.border,color:C.textBright,fontSize:11,fontWeight:600}}>Properties</div>
+          <PropPanel object={selObj} onChange={updObj} mode={tfMode}/>
+        </div>
+      </React.Fragment>}
+      {tab==="events"&&<div style={{flex:1}}><EventEditor events={events} setEvents={setEvents}/></div>}
+      {tab==="animation"&&<div style={{flex:1,display:"flex"}}>
+        <div style={{width:180,minWidth:180,background:C.bgPanel,borderRight:"1px solid "+C.border,display:"flex",flexDirection:"column"}}>
+          <div style={{padding:"6px 8px",borderBottom:"1px solid "+C.border,color:C.textDim,fontSize:9,textTransform:"uppercase",fontWeight:600}}>Objects</div>
+          <ObjList objects={objects} selectedId={selId} onSelect={setSelId} onDelete={delObj}/>
+        </div>
+        <div style={{flex:1,display:"flex",flexDirection:"column"}}>
+          <div style={{flex:1}}><Viewport3D objects={objects} selectedId={selId} onSelect={setSelId} onUpdate={updObj} mode="move" onVertexEdit={handleVertexEdit}/></div>
+          <div style={{height:200,minHeight:200,borderTop:"2px solid "+C.accent,background:C.bgPanel}}><AnimTimeline objects={objects} selectedId={selId} keyframes={keyframes} setKeyframes={setKeyframes}/></div>
+        </div>
+      </div>}
+    </div>
+    {/* STATUS */}
+    <div style={{height:22,minHeight:22,display:"flex",alignItems:"center",background:C.bgDark,borderTop:"1px solid "+C.border,padding:"0 10px",gap:16}}>
+      <span style={{color:isRun?C.orange:C.green,fontSize:9}}>{"\u25cf"} {isRun?"Running":"Ready"}</span>
+      <span style={{color:C.textDim,fontSize:9}}>Objects: {objects.length}</span>
+      <span style={{color:C.textDim,fontSize:9}}>Events: {events.length}</span>
+      {tfMode==="vertex"&&selObj&&<span style={{color:C.yellow,fontSize:9}}>Vertex Mode: {selObj.name}</span>}
+      <div style={{flex:1}}/><span style={{color:C.textDim,fontSize:9}}>Retro 3D Studio v0.3</span>
+    </div>
+    {/* INLINE GAME RUNTIME OVERLAY */}
+    {isRun&&<GameRuntime project={{projectName:projName,objects,events,keyframes}} onStop={()=>setIsRun(false)}/>}
+  </div>;
+}
+
+ReactDOM.render(React.createElement(App), document.getElementById("root"));
+</script>
+</body>
+</html>
